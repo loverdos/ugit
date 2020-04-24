@@ -1,0 +1,188 @@
+#!/usr/bin/fish
+
+# SPDX-License-Identifier: MPL-2.0
+
+# Many times, I needed to version control just one file.
+# ugit: git for one file
+# usage: ugit [commit|ci|c|log|l|status|st|s|diff|d] FILE
+
+set SCRIPT_PATH (status -f)
+set SCRIPT (basename $SCRIPT_PATH)
+
+set EXIT_ARGS       1
+set EXIT_COMMAND    2
+set EXIT_NO_GITFILE 3
+set EXIT_NO_GITDIR  4
+
+function PRINT_STDERR
+  echo $argv 1>&2
+end
+
+function LOG
+  if test -n "$UGIT_LOG"
+    PRINT_STDERR $argv
+  end
+end
+
+function __ugit_usage
+  set -l cmd $argv[1]
+  
+  PRINT_STDERR Usage: $cmd '[commit|ci|c |log|l |status|st|s |diff|d]' FILE
+  PRINT_STDERR 'Set the UGIT_LOG env variable to a non-empty string value to get logging'
+end
+
+function __ugit_check_gitfile_or_exit
+  set -l gitfile $argv[1]
+
+  if test ! -f $gitfile
+    PRINT_STDERR File $gitfile does not exist
+    exit $EXIT_NO_GITFILE
+  end
+end
+
+function __ugit_check_gitdir_or_exit
+  set -l gitfile $argv[1]
+  set -l gitdir  $argv[2]
+
+  if test ! -d $gitdir
+    PRINT_STDERR File $gitfile is not version-controlled by $SCRIPT
+    exit $EXIT_NO_GITDIR
+  end
+end
+
+function __ugit_init
+  set -l gitfile $argv[1]
+  set -l gitdirname $argv[2]
+  set -l gitbasename $argv[3]
+  set -l gitdir $argv[4]
+
+  __ugit_check_gitfile_or_exit $gitfile
+ 
+  if test ! -d $gitdir
+    LOG '#' git init --bare $gitdir
+    git init --bare $gitdir
+
+    set gitexcludefile $gitdir/info/exclude
+    echo '*' >> $gitexcludefile
+    echo '!'$gitbasename >> $gitexcludefile
+  end
+end
+
+function __ugit_add
+  set -l gitfile $argv[1]
+  set -l gitdirname $argv[2]
+  set -l gitbasename $argv[3]
+  set -l gitdir $argv[4]
+
+  __ugit_check_gitfile_or_exit $gitfile
+  __ugit_check_gitdir_or_exit  $gitfile $gitdir
+
+ LOG '#' git --git-dir=$gitdir --work-tree=$gitdirname add $gitfile
+ git --git-dir=$gitdir --work-tree=$gitdirname add $gitfile
+end
+
+function __ugit_status
+  set -l gitfile $argv[1]
+  set -l gitdirname $argv[2]
+  set -l gitbasename $argv[3]
+  set -l gitdir $argv[4]
+ 
+  __ugit_check_gitfile_or_exit $gitfile
+  __ugit_check_gitdir_or_exit  $gitfile $gitdir
+
+  LOG '#' git --git-dir=$gitdir rev-list -n1 --all
+  set -l N (git --git-dir=$gitdir rev-list -n1 --all)
+
+  if test -n "$N"
+    LOG '#' git --git-dir=$gitdir --work-tree=$gitdirname status
+    git --git-dir=$gitdir --work-tree=$gitdirname status
+  end
+end
+
+function __ugit_diff
+  set -l gitfile $argv[1]
+  set -l gitdirname $argv[2]
+  set -l gitbasename $argv[3]
+  set -l gitdir $argv[4]
+ 
+  __ugit_check_gitfile_or_exit $gitfile
+  __ugit_check_gitdir_or_exit  $gitfile $gitdir
+
+  LOG '#' git --git-dir=$gitdir rev-list -n1 --all
+  set -l N (git --git-dir=$gitdir rev-list -n1 --all)
+
+  if test -n "$N"
+    LOG '#' git --git-dir=$gitdir --work-tree=$gitdirname diff
+    git --git-dir=$gitdir --work-tree=$gitdirname diff
+  end
+end
+
+function __ugit_commit
+  set -l gitfile $argv[1]
+  set -l gitdirname $argv[2]
+  set -l gitbasename $argv[3]
+  set -l gitdir $argv[4]
+ 
+  __ugit_check_gitfile_or_exit $gitfile
+  __ugit_check_gitdir_or_exit  $gitfile $gitdir
+  
+  LOG '#' git --git-dir=$gitdir --work-tree=$gitdirname commit -m "$gitmsg"
+  git --git-dir=$gitdir --work-tree=$gitdirname commit
+end
+
+function __ugit_log
+  set -l gitfile $argv[1]
+  set -l gitdirname $argv[2]
+  set -l gitbasename $argv[3]
+  set -l gitdir $argv[4]
+ 
+  __ugit_check_gitfile_or_exit $gitfile
+  __ugit_check_gitdir_or_exit  $gitfile $gitdir
+
+  LOG '#' git --git-dir=$gitdir rev-list -n1 --all
+  set -l N (git --git-dir=$gitdir rev-list -n1 --all)
+
+  if test -n "$N"
+    LOG '#' git --git-dir=$gitdir --work-tree=$gitdirname log
+    git --git-dir=$gitdir --work-tree=$gitdirname log
+  end
+end
+
+
+#::begin
+if test (count $argv) -lt 2
+  LOG ugit, the one-file git-based version control system
+  __ugit_usage $SCRIPT
+  exit $EXIT_ARGS
+end
+
+set gitcmd  $argv[1]
+set gitfile $argv[2]
+set gitdirname  (dirname  $gitfile)
+set gitbasename (basename $gitfile)
+set gitdir $gitdirname/.git.$gitbasename
+
+LOG $SCRIPT $argv
+LOG '  => 'gitcmd=$gitcmd gitfile=$gitfile gitdir=$gitdir
+
+switch $gitcmd
+  case init
+    __ugit_init $gitfile $gitdirname $gitbasename $gitdir
+  case add
+    $SCRIPT_PATH init $gitfile
+    __ugit_add $gitfile $gitdirname $gitbasename $gitdir
+  case status st s
+    __ugit_status $gitfile $gitdirname $gitbasename $gitdir
+  case diff d
+    __ugit_diff $gitfile $gitdirname $gitbasename $gitdir
+  case commit ci c
+    $SCRIPT_PATH add  $gitfile
+    __ugit_commit $gitfile $gitdirname $gitbasename $gitdir
+  case log l
+    __ugit_log $gitfile $gitdirname $gitbasename $gitdir
+  case '*'
+    LOG Unknown command $gitcmd
+    __ugit_usage $SCRIPT
+    exit $EXIT_COMMAND
+end
+#::end
